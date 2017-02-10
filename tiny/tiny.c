@@ -209,6 +209,19 @@ void get_filetype(char *filename, char *filetype)
 }  
 /* $end serve_static */
 
+void handler(int sig)
+{
+    pid_t pid;
+    while ((pid = waitpid(-1, NULL, 0)) > 0) {
+        printf(">>> Handler reaped child %d\n\n", (int)pid);
+    }
+    
+    if(errno != ECHILD)
+        unix_error("waitpid error");
+    
+    Sleep(1);
+}
+
 /*
  * serve_dynamic - run a CGI program on behalf of the client
  */
@@ -222,14 +235,23 @@ void serve_dynamic(int fd, char *filename, char *cgiargs)
     Rio_writen(fd, buf, strlen(buf));
     sprintf(buf, "Server: Tiny Web Server\r\n");
     Rio_writen(fd, buf, strlen(buf));
+    
+    // Install signal handler instead of blocked waiting
+    Signal(SIGCHLD, handler);
   
     if (Fork() == 0) { /* Child */ //line:netp:servedynamic:fork
-	/* Real server would set all CGI vars here */
-	setenv("QUERY_STRING", cgiargs, 1); //line:netp:servedynamic:setenv
-	Dup2(fd, STDOUT_FILENO);         /* Redirect stdout to client */ //line:netp:servedynamic:dup2
-	Execve(filename, emptylist, environ); /* Run CGI program */ //line:netp:servedynamic:execve
+        printf(">>> Worker child process created with id : %d\n", (int)getpid());
+        fflush(stdout);
+        
+        
+        /* Real server would set all CGI vars here */
+        setenv("QUERY_STRING", cgiargs, 1); //line:netp:servedynamic:setenv
+        Dup2(fd, STDOUT_FILENO);         /* Redirect stdout to client */ //line:netp:servedynamic:dup2
+        Execve(filename, emptylist, environ); /* Run CGI program */ //line:netp:servedynamic:execve
     }
-    Wait(NULL); /* Parent waits for and reaps child */ //line:netp:servedynamic:wait
+    //Wait(NULL); /* Parent waits for and reaps child */ //line:netp:servedynamic:wait
+    
+    printf("Ready to serve other requests\n");
 }
 /* $end serve_dynamic */
 
