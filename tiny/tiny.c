@@ -66,6 +66,8 @@ void doit(int fd)
         
         // come to the start of body
         Rio_readnb(&rio, cgiargs, body_len);
+        cgiargs[body_len]='\0'; // end pos
+        
         printf(">>> Body content: %s\n", cgiargs);
     }
     
