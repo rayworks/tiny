@@ -11,7 +11,7 @@
 /* You won't lose style points for including this long line in your code */
 static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
 
-void parse_full_uri(char *uri, char *filename, char *hoststr, char *portstr);
+int parse_full_uri(char *uri, char *filename, char *hoststr, char *portstr);
 void process(int connfd);
 void command(void);
 
@@ -137,46 +137,50 @@ int read_requesthdrs(rio_t *rp, int content_len_read)
     return body_len;
 }
 
-void parse_full_uri(char *uri, char *filename, char *hostname, char *portstr)
+int parse_full_uri(char *uri, char *filename, char *hostname, char *portstr)
 {
-
+    // http://localhost:12345/sub/index.html
     char *scheme = "http://";
     char *pSch = strstr(uri, scheme);
     if (pSch)
     {
-        char *ptr = pSch + ((int)sizeof(scheme) - 1);
+        char *ptr = pSch + (int)strlen(scheme);
+        char *pcln = strchr(ptr, ':');
+
+        char seperator = ':';
+        if (!pcln)
+            seperator = '/';
 
         int i = 0;
-        while (*ptr != ':')
+        while (*ptr != '\0' && *ptr != seperator)
             hostname[i++] = *ptr++;
-
         hostname[i] = '\0';
 
-        ptr++;
-        i = 0;
-        while (*ptr != '/')
-            portstr[i++] = *ptr++;
-        portstr[i] = '\0';
-
-        char domain[BUFSIZ];
-        sprintf(domain, "%s:%s", hostname, portstr);
-
-        char *psrc = strrchr(uri, '/');
-        if (psrc)
+        if (pcln)
         {
-            sprintf(filename, ".%s", psrc);
+            // skip the ":" to get the port
+            ptr++;
+            i = 0;
+            while (*ptr != '\0' && *ptr != '/')
+                portstr[i++] = *ptr++;
+            portstr[i] = '\0';
         }
         else
-        {
-            strcpy(filename, "/");
+        { // default port
+            strcpy(portstr, "80");
         }
 
+        if (*ptr == '\0')
+            strcpy(filename, "/"); // no subpath !
+        else
+            sprintf(filename, "%s", ptr);
+
         printf("parsed host : %s, port : %s, partial uri: %s\n", hostname, portstr, filename);
+
+        return 0;
     }
-    else
-    {
-        app_error("http schema not found");
-    }
+
+    return -1;
 }
 
 int parse_uri(char *uri, char *filename, char *cgiargs)
@@ -242,12 +246,17 @@ void process(int fd)
     char portstr[64];
     char srcname[BUFSIZ];
 
-    parse_full_uri(uri, srcname, hostname, portstr);
+    int ret;
+    if ((ret = parse_full_uri(uri, srcname, hostname, portstr)) < 0)
+    {
+        clienterror(fd, method, "400", "Bad request", "Tiny can't not fulfill this request");
+        return;
+    }
 
     char fwdbuf[RIO_BUFSIZE];
 
-    // filter the partial uri path http://localhost:12345/index.html
-    sprintf(fwdbuf, "GET %s HTTP/1.1\r\n", strrchr(uri, '/'));
+    // filter the partial uri path http://localhost:12345/sub/index.html
+    sprintf(fwdbuf, "GET %s HTTP/1.1\r\n", srcname); // strrchr(uri, '/')
     sprintf(fwdbuf, "%sHost: %s:%s\r\n", fwdbuf, hostname, portstr);
     sprintf(fwdbuf, "%sUser-Agent: %s", fwdbuf, user_agent_hdr);
     sprintf(fwdbuf, "%sAccept: */*\r\nConnection: close\r\nProxy-Connection: close\r\n\r\n", fwdbuf);
